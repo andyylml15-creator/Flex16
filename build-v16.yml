@@ -1,0 +1,1034 @@
+name: Build APK v16
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Crear archivos del proyecto
+        run: |
+          cat > settings.gradle.kts <<'EOF_0'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "FlexAlert"
+          include(":app")
+          EOF_0
+          cat > build.gradle.kts <<'EOF_1'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF_1
+          cat > gradle.properties <<'EOF_2'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF_2
+          mkdir -p app
+          cat > app/build.gradle.kts <<'EOF_3'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.example.flexalert"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.example.flexalert"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("androidx.core:core-ktx:1.13.1")
+          }
+          EOF_3
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF_4'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+              <application
+                  android:label="Flex Alert"
+                  android:theme="@style/Theme.AppCompat.DayNight.DarkActionBar">
+
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".FlexWatcherService"
+                      android:exported="false"
+                      android:label="Flex Alert"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
+              </application>
+          </manifest>
+          EOF_4
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF_5'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+              android:canRetrieveWindowContent="true"
+              android:canPerformGestures="true"
+              android:notificationTimeout="0"
+              android:description="@string/service_desc" />
+          EOF_5
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/strings.xml <<'EOF_6'
+          <resources>
+              <string name="service_desc">Refresca la app de Flex y avisa con sonido cuando aparece un bloque en tu estación.</string>
+          </resources>
+          EOF_6
+          mkdir -p app/src/main/res/layout
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF_7'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="match_parent">
+
+          <LinearLayout
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="vertical" android:padding="24dp">
+
+              <TextView
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="Estaciones que activan la alarma (códigos separados por coma)" />
+              <EditText android:id="@+id/etStations"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:inputType="textCapCharacters" android:text="DMX2,XMX4" />
+
+              <TextView
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:paddingTop="8dp"
+                  android:text="Pausa en la lista antes de repetir el ciclo (segundos): mínimo / máximo" />
+              <LinearLayout
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:orientation="horizontal">
+                  <EditText android:id="@+id/etMin"
+                      android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                      android:inputType="numberDecimal" android:text="0.3" />
+                  <EditText android:id="@+id/etMax"
+                      android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                      android:inputType="numberDecimal" android:text="0.5" />
+              </LinearLayout>
+
+              <TextView
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:paddingTop="8dp"
+                  android:text="Duración de la alarma (segundos)" />
+              <EditText android:id="@+id/etAlarm"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:inputType="number" android:text="20" />
+
+              <CheckBox android:id="@+id/cbAny"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:checked="false"
+                  android:text="Si no es de mis estaciones, tocar cualquier oferta que aparezca" />
+
+              <CheckBox android:id="@+id/cbAlt"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:checked="false"
+                  android:text="Alternar con: Retroceder → Comprobar si hay bloques disponibles" />
+
+              <Button android:id="@+id/btnAccessibility"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="1. Activar servicio de accesibilidad" />
+
+              <Button android:id="@+id/btnBattery"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="2. Quitar optimización de batería" />
+
+              <Button android:id="@+id/btnStart"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="3. INICIAR" />
+
+              <Button android:id="@+id/btnStop"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="DETENER" />
+
+              <Button android:id="@+id/btnDiag"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:text="VER DIAGNÓSTICO" />
+
+              <TextView android:id="@+id/status"
+                  android:layout_width="match_parent" android:layout_height="wrap_content"
+                  android:paddingTop="16dp" android:text="Detenido" />
+          </LinearLayout>
+          </ScrollView>
+          EOF_7
+          mkdir -p app/src/main/java/com/example/flexalert
+          cat > app/src/main/java/com/example/flexalert/MainActivity.kt <<'EOF_8'
+          package com.example.flexalert
+
+          import android.Manifest
+          import android.content.Context
+          import android.content.pm.PackageManager
+          import android.os.Build
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.os.PowerManager
+          import android.provider.Settings
+          import android.widget.Button
+          import android.widget.CheckBox
+          import android.widget.EditText
+          import android.widget.TextView
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+
+                  val prefs = getSharedPreferences("flex", Context.MODE_PRIVATE)
+                  val status = findViewById<TextView>(R.id.status)
+                  val etStations = findViewById<EditText>(R.id.etStations)
+                  val etMin = findViewById<EditText>(R.id.etMin)
+                  val etMax = findViewById<EditText>(R.id.etMax)
+                  val etAlarm = findViewById<EditText>(R.id.etAlarm)
+                  val cbAny = findViewById<CheckBox>(R.id.cbAny)
+                  val cbAlt = findViewById<CheckBox>(R.id.cbAlt)
+
+                  if (Build.VERSION.SDK_INT >= 33 &&
+                      checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                  ) {
+                      requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+                  }
+
+                  etStations.setText(prefs.getString("stations", "DMX2,XMX4"))
+                  etMin.setText(prefs.getFloat("minPause", 0.3f).toString())
+                  etMax.setText(prefs.getFloat("maxPause", 0.5f).toString())
+                  etAlarm.setText(prefs.getInt("alarmSec", 20).toString())
+                  cbAny.isChecked = prefs.getBoolean("anyOffer", false)
+                  cbAlt.isChecked = prefs.getBoolean("altCheck", false)
+
+                  findViewById<Button>(R.id.btnAccessibility).setOnClickListener {
+                      startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                  }
+
+                  findViewById<Button>(R.id.btnBattery).setOnClickListener {
+                      val pm = getSystemService(PowerManager::class.java)
+                      if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                          startActivity(
+                              Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                                  .setData(Uri.parse("package:$packageName"))
+                          )
+                      }
+                  }
+
+                  findViewById<Button>(R.id.btnStart).setOnClickListener {
+                      val svc = FlexWatcherService.instance
+                      if (svc == null) {
+                          status.text = "Activa primero el servicio de accesibilidad"
+                          return@setOnClickListener
+                      }
+                      val stations = etStations.text.toString().trim()
+                      if (stations.split(",").none { it.trim().isNotEmpty() }) {
+                          status.text = "Escribe al menos un código de estación"
+                          return@setOnClickListener
+                      }
+                      val mn = (etMin.text.toString().replace(',', '.').toFloatOrNull() ?: 0.3f).coerceIn(0f, 60f)
+                      val mx = (etMax.text.toString().replace(',', '.').toFloatOrNull() ?: 0.5f).coerceIn(mn, 60f)
+                      val al = (etAlarm.text.toString().toIntOrNull() ?: 20).coerceIn(3, 120)
+                      etMin.setText(mn.toString()); etMax.setText(mx.toString()); etAlarm.setText(al.toString())
+                      prefs.edit()
+                          .putString("stations", stations)
+                          .putFloat("minPause", mn).putFloat("maxPause", mx).putInt("alarmSec", al)
+                          .putBoolean("anyOffer", cbAny.isChecked)
+                          .putBoolean("altCheck", cbAlt.isChecked)
+                          .apply()
+                      svc.start()
+                      status.text = "Activo ($stations, pausa $mn-$mx s). Abre Flex y deja la pantalla Ofertas."
+                  }
+
+                  findViewById<Button>(R.id.btnStop).setOnClickListener {
+                      FlexWatcherService.instance?.stop()
+                      status.text = "Detenido"
+                  }
+
+                  findViewById<Button>(R.id.btnDiag).setOnClickListener {
+                      status.text = "Servicio conectado: ${FlexWatcherService.instance != null}\n" +
+                          "Apps vistas: ${Diag.pkgs.joinToString().ifEmpty { "ninguna" }}\n" +
+                          "Ciclos de revision: ${Diag.loops}\n" +
+                          "Contador leido: ${Diag.lastCount}\n" +
+                          "Coincide estacion: ${Diag.lastMatch}\n" +
+                          "Ultimo clic: ${Diag.lastTap}\n" +
+                          "Ultimo Programar: ${Diag.lastAccept}"
+                  }
+              }
+          }
+          EOF_8
+          mkdir -p app/src/main/java/com/example/flexalert
+          cat > app/src/main/java/com/example/flexalert/FlexWatcherService.kt <<'EOF_9'
+          package com.example.flexalert
+
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.GestureDescription
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.graphics.Path
+          import android.os.SystemClock
+          import android.graphics.Rect
+          import android.media.AudioAttributes
+          import android.media.MediaPlayer
+          import android.media.RingtoneManager
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+          import kotlin.random.Random
+
+          /** Datos de diagnostico (solo nombres de paquete y resultados, nunca textos de otras apps). */
+          object Diag {
+              val pkgs = LinkedHashSet<String>()
+              var loops = 0
+              var lastCount = "-"
+              var lastMatch = false
+              var lastTap = "-"
+              var lastAccept = "-"
+          }
+
+          class FlexWatcherService : AccessibilityService() {
+
+              companion object {
+                  var instance: FlexWatcherService? = null
+              }
+
+              // Parametros configurables (se cargan al pulsar INICIAR).
+              private var stations = listOf("DMX2", "XMX4")
+              private var minDelay = 300L
+              private var maxDelay = 500L
+              private var alarmMs = 20000L
+              private var anyOffer = false
+
+              private fun loadPrefs() {
+                  val p = getSharedPreferences("flex", MODE_PRIVATE)
+                  stations = (p.getString("stations", "DMX2,XMX4") ?: "")
+                      .split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                  val mn = p.getFloat("minPause", 0.3f).coerceIn(0f, 60f)
+                  val mx = p.getFloat("maxPause", 0.5f).coerceIn(mn, 60f)
+                  minDelay = (mn * 1000).toLong()
+                  maxDelay = (mx * 1000).toLong()
+                  alarmMs = p.getInt("alarmSec", 20).coerceIn(3, 120) * 1000L
+                  anyOffer = p.getBoolean("anyOffer", false)
+                  altCheck = p.getBoolean("altCheck", false)
+              }
+
+              private val handler = Handler(Looper.getMainLooper())
+              private var running = false
+              private var paused = false   // oferta de tus estaciones en pantalla: no refrescar
+              private var player: MediaPlayer? = null
+              private var lastUnmatchedCount = 0
+
+              // "0 de 0 ofertas", "1 de 1 oferta", "2 de 2 ofertas"...
+              private val counterRegex = Regex("""(\d+)\s+de\s+(\d+)\s+ofertas?""", RegexOption.IGNORE_CASE)
+
+              private data class Screen(val count: Int?, val match: Boolean, val found: String?, val detail: String?, val total: Int? = null)
+
+              private fun isAmazon(p: CharSequence?): Boolean = p?.startsWith("com.amazon.") == true
+
+              private val refreshLoop = object : Runnable {
+                  override fun run() {
+                      if (!running) return
+                      Diag.loops++
+                      if (paused) { handlePaused(); return }
+                      if (cycling || accepting) { handler.postDelayed(this, 50); return }   // ciclo o aceptacion en curso
+                      val root = rootInActiveWindow
+                      val pkg = root?.packageName
+                      if (root == null || !isAmazon(pkg)) {
+                          Diag.lastTap = "ventana activa no es de Amazon: $pkg"
+                          listSeenAt = 0L
+                          handler.postDelayed(this, 500)
+                          return
+                      }
+                      val s = readScreen(root)
+                      Diag.lastCount = if (s.count == null) "no encontrado" else "${s.count} de ${s.total}"
+                      Diag.lastMatch = s.match
+                      val now = SystemClock.elapsedRealtime()
+                      when {
+                          s.count == null -> {
+                              // No estamos en la lista de Ofertas: si llevamos un rato asi, volver a ella (menu > Ofertas).
+                              listSeenAt = 0L
+                              if (notListSince == 0L) notListSince = now
+                              if (now - notListSince > 2500) {
+                                  notListSince = now
+                                  recoverToOfertas(root)
+                              }
+                          }
+                          hit(s) -> {
+                              notListSince = 0L
+                              listSeenAt = 0L
+                              alarm(s.found, s.detail)
+                              return
+                          }
+                          else -> {
+                              notListSince = 0L
+                              if (s.count == 0) lastUnmatchedCount = 0
+                              if (s.count > 0 && s.count != lastUnmatchedCount) {
+                                  // Oferta de otra estacion: vibracion corta + aviso (el ciclo sigue).
+                                  lastUnmatchedCount = s.count
+                                  getSystemService(Vibrator::class.java)
+                                      ?.vibrate(VibrationEffect.createOneShot(300, VibrationEffect.DEFAULT_AMPLITUDE))
+                                  notifyUser("Oferta de otra estación", "Hay ${s.count} oferta(s) que no son de tus estaciones.", 2)
+                                  Diag.lastTap = "vibro por oferta de otra estacion"
+                              }
+                              // Lista cargada y sin oferta util: tras una pausa minima, repetir el ciclo.
+                              if (listSeenAt == 0L) {
+                                  listSeenAt = now
+                                  pauseTarget = Random.nextLong(minDelay, maxDelay + 1)
+                              }
+                              if (now - listSeenAt >= pauseTarget) {
+                                  listSeenAt = 0L
+                                  startMenuCycle(root)
+                              }
+                          }
+                      }
+                      handler.postDelayed(this, 60)
+                  }
+              }
+
+              private fun scheduleNext() {
+                  if (running) handler.postDelayed(refreshLoop, 60L)
+              }
+
+              /** Con la oferta en pantalla no se refresca: solo se espera a que desaparezca o la aceptes. */
+              private fun handlePaused() {
+                  if (accepting) { handler.postDelayed(refreshLoop, 300); return }   // no estorbar mientras se acepta
+                  if (acceptedAt != 0L && SystemClock.elapsedRealtime() - acceptedAt > 2500) {
+                      acceptedAt = 0L
+                      paused = false
+                      listSeenAt = 0L
+                      notListSince = SystemClock.elapsedRealtime()
+                      Diag.lastTap = "intento de aceptar terminado: reanudando la busqueda"
+                      scheduleNext()
+                      return
+                  }
+                  val root = rootInActiveWindow
+                  if (root != null && isAmazon(root.packageName)) {
+                      val s = readScreen(root)
+                      Diag.lastCount = if (s.count == null) "no encontrado" else "${s.count} de ${s.total}"
+                      Diag.lastMatch = s.match
+                      val gone = s.count != null && !hit(s)
+                      if (gone) {
+                          paused = false
+                          silence()
+                          Diag.lastTap = "oferta ya no esta: reanudando"
+                          scheduleNext()
+                          return
+                      }
+                  }
+                  Diag.lastTap = "pausado: esperando a que aceptes o desaparezca la oferta"
+                  handler.postDelayed(refreshLoop, 1000)
+              }
+
+              private fun checkAfterRefresh() {
+                  if (!running || paused) return
+                  val root = rootInActiveWindow ?: return
+                  if (!isAmazon(root.packageName)) return
+                  val s = readScreen(root)
+                  if (hit(s)) {
+                      handler.removeCallbacks(refreshLoop)
+                      alarm(s.found, s.detail)
+                  }
+              }
+
+              fun start() {
+                  lastTotal = null
+                  listSeenAt = 0L
+                  notListSince = 0L
+                  acceptedAt = 0L
+                  useCheckNext = false
+                  accepting = false
+                  cycling = false
+                  loadPrefs()
+                  running = true
+                  paused = false
+                  lastUnmatchedCount = 0
+                  Diag.loops = 0
+                  handler.removeCallbacksAndMessages(null)
+                  handler.postDelayed(refreshLoop, 3000)
+              }
+
+              fun stop() {
+                  accepting = false
+                  cycling = false
+                  running = false
+                  paused = false
+                  handler.removeCallbacksAndMessages(null)
+                  player?.release()
+                  player = null
+                  getSystemService(Vibrator::class.java)?.cancel()
+              }
+
+              private fun readScreen(root: AccessibilityNodeInfo): Screen {
+                  val texts = ArrayList<String>()
+                  collectText(root, texts)
+                  var count: Int? = null
+                  var total: Int? = null
+                  for (t in texts) {
+                      val m = counterRegex.find(t) ?: continue
+                      count = m.groupValues[1].toInt()   // ofertas que coinciden con el filtro
+                      total = m.groupValues[2].toInt()   // ofertas totales: sube cuando llegan nuevas
+                      break
+                  }
+                  val idx = texts.indexOfFirst { t -> stations.any { t.contains(it, ignoreCase = true) } }
+                  val found = if (idx >= 0) stations.first { texts[idx].contains(it, ignoreCase = true) } else null
+                  val detail = if (idx >= 0) buildDetail(texts, idx) else null
+                  return Screen(count, found != null, found, detail, total)
+              }
+
+              private val timeRe = Regex("""\d{1,2}:\d{2}.*\d{1,2}:\d{2}""")
+              private val priceRe = Regex("""\$\s?\d[\d,.]*""")
+              private val titleRe = Regex("""\([A-Z0-9/]{3,}\)""")
+
+              /** Texto de la tarjeta (estacion, horario, pago) tal como lo muestra la lista de ofertas. */
+              private fun buildDetail(texts: List<String>, idx: Int): String {
+                  val title = texts[idx]
+                  val window = ArrayList<String>()
+                  for (k in idx + 1 until minOf(idx + 6, texts.size)) {
+                      if (titleRe.containsMatchIn(texts[k])) break   // empieza otra tarjeta
+                      window.add(texts[k])
+                  }
+                  val time = window.firstOrNull { timeRe.containsMatchIn(it) }
+                  val price = window.firstOrNull { priceRe.containsMatchIn(it) }
+                  return listOfNotNull(title, time, price).joinToString("\n")
+              }
+
+              private fun collectText(node: AccessibilityNodeInfo?, out: MutableList<String>) {
+                  if (node == null) return
+                  node.text?.let { out.add(it.toString()) }
+                  node.contentDescription?.let { out.add(it.toString()) }
+                  for (i in 0 until node.childCount) collectText(node.getChild(i), out)
+              }
+
+              /** Hay oferta en pantalla: de tus estaciones o, si esta activado, cualquiera. */
+              private fun hit(s: Screen): Boolean = (s.count ?: 0) > 0 && (s.match || anyOffer)
+
+              private fun collectNodes(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
+                  if (node == null) return
+                  out.add(node)
+                  for (i in 0 until node.childCount) collectNodes(node.getChild(i), out)
+              }
+
+              private fun labelOf(n: AccessibilityNodeInfo): String =
+                  listOfNotNull(n.text, n.contentDescription).joinToString(" ")
+
+              /** Tarjeta de la oferta: primero una de tus estaciones; si no, la primera que aparezca. */
+              private fun findOfferNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+                  val all = ArrayList<AccessibilityNodeInfo>()
+                  collectNodes(root, all)
+                  val byStation = all.firstOrNull { n ->
+                      val t = labelOf(n)
+                      stations.any { t.contains(it, ignoreCase = true) }
+                  }
+                  if (byStation != null) return byStation
+                  return if (anyOffer) all.firstOrNull { titleRe.containsMatchIn(labelOf(it)) } else null
+              }
+
+              /** Clic en el nodo (o en su padre clicable); si falla, toque por coordenadas. */
+              private fun clickNode(node: AccessibilityNodeInfo): String {
+                  var target: AccessibilityNodeInfo? = node
+                  while (target != null && !target.isClickable) target = target.parent
+                  if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                      return "clic directo OK"
+                  }
+                  val r = Rect()
+                  node.getBoundsInScreen(r)
+                  val path = Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }
+                  val stroke = GestureDescription.StrokeDescription(path, 0, 10L)
+                  val ok = dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+                  return "toque por coordenadas (enviado=$ok)"
+              }
+
+              private fun tapRefresh(root: AccessibilityNodeInfo) {
+                  val node = root.findAccessibilityNodeInfosByText("Actualizar")
+                      .firstOrNull { it.text?.toString().equals("Actualizar", ignoreCase = true) }
+                  if (node == null) {
+                      Diag.lastTap = "no encontre el boton Actualizar"
+                      return
+                  }
+                  Diag.lastTap = "Actualizar: " + clickNode(node)
+              }
+
+              // ---- Aceptacion ultra rapida ----
+              private var accepting = false
+              private var acceptDeadline = 0L
+              private var detectAt = 0L
+
+              /** Paso 1: tocar la oferta. Paso 2: tocar "Programar" en cuanto aparezca (por evento + sondeo de 30 ms). */
+              private fun acceptOffer() {
+                  val root = rootInActiveWindow
+                  val offer = if (root != null && isAmazon(root.packageName)) findOfferNode(root) else null
+                  if (offer == null) {
+                      Diag.lastTap = "no encontre la oferta para tocar"
+                      ring()
+                      return
+                  }
+                  accepting = true
+                  acceptDeadline = SystemClock.elapsedRealtime() + 6000
+                  Diag.lastTap = "oferta: " + clickNode(offer)
+                  handler.post(pollProgramar)
+              }
+
+              private val pollProgramar = object : Runnable {
+                  override fun run() {
+                      if (accepting && !tryProgramar()) handler.postDelayed(this, 30)
+                  }
+              }
+
+              /** Devuelve true si ya termino (clic hecho o tiempo agotado). */
+              private fun tryProgramar(): Boolean {
+                  if (!accepting) return true
+                  val root = rootInActiveWindow
+                  if (root != null && isAmazon(root.packageName)) {
+                      val btn = root.findAccessibilityNodeInfosByText("Programar")
+                          .firstOrNull { isExact(it, "Programar") }
+                      if (btn != null) {
+                          val how = clickNode(btn)
+                          accepting = false
+                          Diag.lastAccept = "$how en ${SystemClock.elapsedRealtime() - detectAt} ms desde la deteccion"
+                          Diag.lastTap = "Programar: $how"
+                          ring()
+                          return true
+                      }
+                  }
+                  if (SystemClock.elapsedRealtime() > acceptDeadline) {
+                      accepting = false
+                      Diag.lastAccept = "no aparecio el boton Programar"
+                      Diag.lastTap = "no aparecio el boton Programar"
+                      ring()
+                      return true
+                  }
+                  return false
+              }
+
+              private val silenceTask = Runnable { silence() }
+
+              private fun silence() {
+                  handler.removeCallbacks(silenceTask)
+                  player?.release()
+                  player = null
+                  getSystemService(Vibrator::class.java)?.cancel()
+              }
+
+              private fun notifyUser(title: String, text: String, id: Int, big: String? = null) {
+                  try {
+                      val b = Notification.Builder(this, "ofertas")
+                          .setSmallIcon(android.R.drawable.ic_dialog_info)
+                          .setContentTitle(title)
+                          .setContentText(text)
+                          .setCategory(Notification.CATEGORY_ALARM)
+                          .setAutoCancel(true)   // se cierra deslizandola
+                      if (big != null) b.setStyle(Notification.BigTextStyle().bigText(big))
+                      getSystemService(NotificationManager::class.java)?.notify(id, b.build())
+                  } catch (_: Exception) { }
+              }
+
+              private var pendingFound: String? = null
+              private var pendingDetail: String? = null
+
+              private fun alarm(found: String? = null, detail: String? = null) {
+                  detectAt = SystemClock.elapsedRealtime()
+                  cycling = false
+                  paused = true   // deja de refrescar hasta que la oferta desaparezca o la aceptes
+                  pendingFound = found
+                  pendingDetail = detail
+                  acceptOffer()   // lo primero y mas rapido: tocar la oferta y luego "Programar"
+                  handler.postDelayed(refreshLoop, 1000)
+              }
+
+              /** Sonido, vibracion y notificacion: se hacen DESPUES del clic para no retrasarlo. */
+              private fun ring() {
+                  acceptedAt = SystemClock.elapsedRealtime()
+                  val found = pendingFound
+                  val detail = pendingDetail
+                  val lines = detail?.split("\n").orEmpty()
+                  val summary = lines.drop(1).joinToString(" · ").ifEmpty { lines.firstOrNull() ?: "Abre Flex para verla." }
+                  notifyUser("¡Oferta en ${found ?: "tu estación"}!", summary, 1, detail)
+                  try {
+                      val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                      player?.release()
+                      player = MediaPlayer().apply {
+                          setDataSource(this@FlexWatcherService, uri)
+                          setAudioAttributes(
+                              AudioAttributes.Builder()
+                                  .setUsage(AudioAttributes.USAGE_ALARM)
+                                  .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                  .build()
+                          )
+                          isLooping = true
+                          prepare()
+                          start()
+                      }
+                      val vib = getSystemService(Vibrator::class.java)
+                      vib.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+                      handler.removeCallbacks(silenceTask)
+                      handler.postDelayed(silenceTask, alarmMs)
+                  } catch (_: Exception) { }
+              }
+
+              // ---- Actualizar mediante el menu: tres lineas -> "Ofertas" ----
+              private var cycling = false
+              private var lastTotal: Int? = null
+              private var lastCycleAt = 0L
+              private val safetyCycleMs = 30000L   // red de seguridad: un ciclo cada 30 s aunque el marcador no cambie
+              private var cycleStep = 0            // 0 = menu tocado una vez, 1 = ya se reintento
+              private var cycleDeadline = 0L
+              private var cycleClickAt = 0L
+
+              /** Coincidencia exacta por texto O por descripcion (por separado: si Flex pone ambos, no se mezclan). */
+              private fun isExact(n: AccessibilityNodeInfo, word: String): Boolean =
+                  n.text?.toString()?.trim().equals(word, ignoreCase = true) ||
+                      n.contentDescription?.toString()?.trim().equals(word, ignoreCase = true)
+
+              private fun findExact(root: AccessibilityNodeInfo, word: String): AccessibilityNodeInfo? =
+                  root.findAccessibilityNodeInfosByText(word).firstOrNull { n -> isExact(n, word) }
+
+              /** Todas las ventanas de Amazon (el menu lateral puede ser una ventana distinta a la principal). */
+              private fun allRoots(): List<AccessibilityNodeInfo> {
+                  val list = ArrayList<AccessibilityNodeInfo>()
+                  rootInActiveWindow?.let { list.add(it) }
+                  try {
+                      for (w in windows) {
+                          val r = w.root
+                          if (r != null) list.add(r)
+                      }
+                  } catch (_: Exception) { }
+                  return list.filter { isAmazon(it.packageName) }
+              }
+
+              private fun drawerSeen(): Boolean = allRoots().any { r ->
+                  findExact(r, "Configuración") != null || findExact(r, "Tu Panel") != null
+              }
+
+              /** Boton de las tres lineas: primero por descripcion (menu/navigation/drawer), luego por posicion arriba a la izquierda. */
+              private fun findMenuButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+                  val all = ArrayList<AccessibilityNodeInfo>()
+                  collectNodes(root, all)
+                  val dm = resources.displayMetrics
+                  val r = Rect()
+                  val inCorner = { n: AccessibilityNodeInfo ->
+                      n.getBoundsInScreen(r)
+                      r.width() > 0 && r.left < dm.widthPixels * 0.25 && r.top < dm.heightPixels * 0.18 &&
+                          r.width() < dm.widthPixels * 0.3
+                  }
+                  val byDesc = all.firstOrNull { n ->
+                      val d = n.contentDescription?.toString() ?: ""
+                      inCorner(n) && (d.contains("menú", ignoreCase = true) || d.contains("menu", ignoreCase = true) ||
+                          d.contains("navigation", ignoreCase = true) || d.contains("drawer", ignoreCase = true) ||
+                          d.contains("abrir", ignoreCase = true))
+                  }
+                  if (byDesc != null) return byDesc
+                  return all.firstOrNull { n -> n.isClickable && inCorner(n) }
+              }
+
+              private fun tapMenuButton(root: AccessibilityNodeInfo): String {
+                  val btn = findMenuButton(root)
+                  if (btn != null) return "boton: " + clickNode(btn)
+                  // Ultimo recurso: toque por coordenadas en la esquina superior izquierda (donde esta el icono de tres lineas)
+                  val dm = resources.displayMetrics
+                  val path = Path().apply { moveTo(dm.widthPixels * 0.08f, dm.heightPixels * 0.075f) }
+                  val stroke = GestureDescription.StrokeDescription(path, 0, 10L)
+                  val ok = dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+                  return "coordenadas (enviado=$ok)"
+              }
+
+              /** True si el nodo (o uno de sus padres cercanos) se puede tocar. El titulo de la pantalla no es tocable. */
+              private fun hasClickable(n: AccessibilityNodeInfo): Boolean {
+                  var t: AccessibilityNodeInfo? = n
+                  var depth = 0
+                  while (t != null && depth < 4) {
+                      if (t.isClickable) return true
+                      t = t.parent
+                      depth++
+                  }
+                  return false
+              }
+
+              /** Opcion "Ofertas" del MENU. Distingue entre el titulo de la pantalla ("OFERTAS") y la opcion del menu ("Ofertas"):
+               *  no por mayusculas (la comparacion ignora el tipo de letra), sino porque la del menu es tocable, esta justo
+               *  ARRIBA de "Tu Panel" y mas abajo que el titulo. Si no encuentra una opcion valida, devuelve null y sigue esperando
+               *  en lugar de tocar el titulo por error. */
+              private fun findMenuOfertas(): AccessibilityNodeInfo? {
+                  val found = ArrayList<AccessibilityNodeInfo>()
+                  var tuPanelTop = -1
+                  for (r in allRoots()) {
+                      found.addAll(r.findAccessibilityNodeInfosByText("Ofertas"))
+                      val tp = findExact(r, "Tu Panel")
+                      if (tp != null) {
+                          val rr = Rect()
+                          tp.getBoundsInScreen(rr)
+                          tuPanelTop = rr.top
+                      }
+                  }
+                  val exact = found.filter { isExact(it, "Ofertas") }
+                  var pool = if (exact.isNotEmpty()) exact else found.filter { labelOf(it).length <= 15 }
+                  val tocables = pool.filter { hasClickable(it) }
+                  if (tocables.isNotEmpty()) pool = tocables
+                  else if (tuPanelTop < 0) return null   // no se ve el menu y el unico candidato no es tocable: es el titulo
+                  if (tuPanelTop >= 0) {
+                      val limit = tuPanelTop
+                      val above = pool.filter { n ->
+                          val rr = Rect()
+                          n.getBoundsInScreen(rr)
+                          rr.top < limit
+                      }
+                      if (above.isNotEmpty()) pool = above
+                  }
+                  return pool.maxByOrNull { n ->
+                      val rr = Rect()
+                      n.getBoundsInScreen(rr)
+                      rr.top
+                  }
+              }
+
+              private var listSeenAt = 0L          // desde cuando se ve la lista de Ofertas sin ofertas utiles
+              private var notListSince = 0L        // desde cuando NO se ve la lista de Ofertas
+              private var pauseTarget = 0L         // pausa elegida (ms) antes de repetir el ciclo
+              private var acceptedAt = 0L          // cuando termino el intento de aceptar (para reanudar la busqueda)
+
+              private var altCheck = false         // casilla: alternar con "Retroceder > Comprobar si hay bloques disponibles"
+              private var useCheckNext = false      // en el siguiente ciclo toca usar la variante "Comprobar bloques"
+              private var cycleMode = 0             // 0 = Retroceder > menu > Ofertas ; 1 = Retroceder > Comprobar bloques
+              private var backRetries = 0
+
+              /** True si en pantalla esta el marcador "X de Y ofertas" (es decir, seguimos en la lista de Ofertas). */
+              private fun hasCounter(root: AccessibilityNodeInfo): Boolean =
+                  root.findAccessibilityNodeInfosByText("ofertas").any { n ->
+                      counterRegex.containsMatchIn(n.text?.toString() ?: "")
+                  }
+
+              private fun findContaining(root: AccessibilityNodeInfo, part: String): AccessibilityNodeInfo? =
+                  root.findAccessibilityNodeInfosByText(part).firstOrNull()
+
+              /** Ciclo de recarga: Retroceder > menu > Ofertas. Sin Retroceder solo en la recuperacion desde otra pantalla. */
+              private fun startMenuCycle(root: AccessibilityNodeInfo, withBack: Boolean = true) {
+                  val now = SystemClock.elapsedRealtime()
+                  cycling = true
+                  lastCycleAt = now
+                  cycleStep = 0
+                  backRetries = 0
+                  cycleClickAt = now
+                  cycleDeadline = now + 5000
+                  cycleMode = if (withBack && altCheck && useCheckNext) 1 else 0
+                  if (withBack) useCheckNext = if (altCheck) !useCheckNext else false
+                  if (withBack) {
+                      val ok = performGlobalAction(GLOBAL_ACTION_BACK)
+                      Diag.lastTap = "retroceder (" + (if (cycleMode == 1) "luego Comprobar bloques" else "luego menu > Ofertas") +
+                          "): enviado=$ok"
+                  } else {
+                      Diag.lastTap = "menu (recuperacion): " + tapMenuButton(root)
+                      cycleStep = 1
+                  }
+                  handler.post(pollCycle)
+              }
+
+              private fun afterCycle() {
+                  cycling = false
+                  listSeenAt = 0L
+                  notListSince = SystemClock.elapsedRealtime()   // da tiempo a que cargue la lista antes de intentar recuperar
+              }
+
+              /** Estamos en otra pantalla de Flex (no en la lista de Ofertas): volver a ella lo mas rapido posible. */
+              private fun recoverToOfertas(root: AccessibilityNodeInfo) {
+                  if (drawerSeen()) {
+                      val o = findMenuOfertas()
+                      if (o != null) {
+                          Diag.lastTap = "recuperando: menu > Ofertas: " + clickNode(o)
+                          return
+                      }
+                  }
+                  if (findMenuButton(root) != null) {
+                      startMenuCycle(root, false)
+                  } else {
+                      Diag.lastTap = "recuperando: retroceder (enviado=" + performGlobalAction(GLOBAL_ACTION_BACK) + ")"
+                  }
+              }
+
+              private val pollCycle = object : Runnable {
+                  override fun run() {
+                      if (cycling && !tryCycle()) handler.postDelayed(this, 25)
+                  }
+              }
+
+              /** Devuelve true si el ciclo ya termino (o se agoto el tiempo). */
+              private fun tryCycle(): Boolean {
+                  if (!cycling) return true
+                  val now = SystemClock.elapsedRealtime()
+                  val root = rootInActiveWindow
+                  val inAmazon = root != null && isAmazon(root.packageName)
+                  if (cycleStep == 0) {
+                      if (inAmazon && root != null) {
+                          if (!hasCounter(root)) {
+                              // Ya salimos de la lista de Ofertas: Retroceder funciono.
+                              if (cycleMode == 1) {
+                                  val btn = findContaining(root, "Comprobar si hay bloques")
+                                  if (btn != null) {
+                                      Diag.lastTap = "Comprobar bloques: " + clickNode(btn)
+                                      afterCycle()
+                                      return true
+                                  }
+                              } else if (findMenuButton(root) != null) {
+                                  Diag.lastTap = "menu: " + tapMenuButton(root)
+                                  cycleStep = 1
+                                  cycleClickAt = now
+                              }
+                          } else if (backRetries < 1 && now - cycleClickAt > 1500) {
+                              // Seguimos en la lista: repetir Retroceder una sola vez
+                              backRetries++
+                              cycleClickAt = now
+                              Diag.lastTap = "retroceder (reintento): enviado=" + performGlobalAction(GLOBAL_ACTION_BACK)
+                          }
+                      }
+                  } else {
+                      // Modo menu: en cuanto aparezca la opcion "Ofertas" (en cualquier ventana), tocarla
+                      val ofertas = findMenuOfertas()
+                      if (ofertas != null) {
+                          Diag.lastTap = "menu > Ofertas: " + clickNode(ofertas)
+                          afterCycle()
+                          return true
+                      }
+                      // Si el menu no se abrio (no se ve ninguna de sus opciones), reintentar UNA vez;
+                      // si ya se ve abierto no se toca el boton, porque lo cerraria.
+                      if (cycleStep == 1 && now - cycleClickAt > 1500 && inAmazon && root != null && !drawerSeen()) {
+                          cycleStep = 2
+                          Diag.lastTap = "menu (reintento): " + tapMenuButton(root)
+                      }
+                  }
+                  if (now > cycleDeadline) {
+                      afterCycle()
+                      val seen = ArrayList<String>()
+                      for (r in allRoots()) collectText(r, seen)
+                      Diag.lastTap = "ciclo agotado en el paso $cycleStep (modo " + (if (cycleMode == 1) "comprobar bloques" else "menu") +
+                          "). Vistos: " + seen.distinct().take(16).joinToString(" | ")
+                      return true
+                  }
+                  return false
+              }
+
+              /** Si el total del marcador cambio (llegaron o salieron ofertas), lanza YA un ciclo de filtro. */
+              private fun onCounter(s: Screen, root: AccessibilityNodeInfo) {
+                  val t = s.total ?: return
+                  val prev = lastTotal
+                  lastTotal = t
+                  if (prev != null && t != prev && !cycling) {
+                      startMenuCycle(root)
+                      Diag.lastTap = "marcador cambio de $prev a $t: ciclo de filtro"
+                  }
+              }
+
+              private var lastQuick = 0L
+
+              /** Se llama en cada cambio de pantalla de Amazon: si ya hay oferta, se actua al instante. */
+              private fun quickCheck() {
+                  val now = SystemClock.elapsedRealtime()
+                  if (now - lastQuick < 60) return   // evita revisar el arbol mas de ~16 veces por segundo
+                  lastQuick = now
+                  val root = rootInActiveWindow ?: return
+                  if (!isAmazon(root.packageName)) return
+                  val s = readScreen(root)
+                  Diag.lastCount = if (s.count == null) "no encontrado" else "${s.count} de ${s.total}"
+                  Diag.lastMatch = s.match
+                  if (hit(s)) {
+                      handler.removeCallbacks(refreshLoop)
+                      alarm(s.found, s.detail)
+                      return
+                  }
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+                  if (accepting && event != null &&
+                      (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                       event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) tryProgramar()
+                  if (running && !paused && !accepting && !cycling && event != null && isAmazon(event.packageName) &&
+                      (event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)) quickCheck()
+                  if (cycling && event != null &&
+                      (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                       event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED)) tryCycle()
+                  val p = event?.packageName?.toString() ?: return
+                  if (p != packageName && !p.startsWith("com.android.systemui")) {
+                      Diag.pkgs.add(p)
+                      while (Diag.pkgs.size > 8) Diag.pkgs.remove(Diag.pkgs.first())
+                  }
+              }
+
+              override fun onInterrupt() { stop() }
+              override fun onServiceConnected() {
+                  instance = this
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm?.createNotificationChannel(
+                      NotificationChannel("ofertas", "Ofertas", NotificationManager.IMPORTANCE_HIGH)
+                  )
+              }
+              override fun onDestroy() { stop(); instance = null; super.onDestroy() }
+          }
+          EOF_9
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FlexAlert-v16-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
